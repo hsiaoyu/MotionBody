@@ -1,3 +1,4 @@
+# - Try to find the LIBIGL library
 # Once done this will define
 #
 #  LIBIGL_FOUND - system has LIBIGL
@@ -22,7 +23,7 @@ find_path(LIBIGL_INCLUDE_DIR igl/readOBJ.h
         /usr
         /usr/local
         /usr/local/igl/libigl
-        /var/local/hsiaoyu/libigl
+#        /home/kiki/tools/libigl
     PATH_SUFFIXES include
 )
 
@@ -32,5 +33,5 @@ find_package_handle_standard_args(LIBIGL
     LIBIGL_INCLUDE_DIR)
 mark_as_advanced(LIBIGL_INCLUDE_DIR)
 
-list(APPEND CMAKE_MODULE_PATH "${LIBIGL_INCLUDE_DIR}/../cmake")
+list(APPEND CMAKE_MODULE_PATH "${LIBIGL_INCLUDE_DIR}/../shared/cmake")
 include(libigl)

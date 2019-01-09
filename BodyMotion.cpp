@@ -2,28 +2,24 @@
 #include <fstream>
 #include <cmath>
 #include "igl/readOBJ.h"
-#include "igl/writeOBJ.h"
+#include "igl/writePLY.h"
 #include <Eigen/Dense>
 #include <vector>
+
+struct Quaternion{
+       double s;
+       Eigen::Vector3d v;
+       Eigen::Vector3d rotate(const Eigen::Vector3d x){
+          return x * ( s * s - v.squaredNorm()) + 2.0 * v * v.dot(x) + 2.0 * s * v.cross(x);
+          //return x*(s * s - dot(v,v)) + 2.*v*dot(v,x) + 2.*cross(v,x)*s;
+       }
+};
 
 struct BodyPart{
        Eigen::MatrixXd originV;
        Eigen::MatrixXi F;
-       std::vector<Eigen::Vector3d> displacement; //displacement on each frame
-       std::vector<Eigen::Vector4d> rot; // rotation on each frame
-};
-
-class Body{
-	public : void addPart (BodyPart * newPart){
-			bodyparts.push_back(newPart);
-		 }
-		 
-		 ~Body(){
-			for (auto it : bodyparts)
-				delete it;
-		 }
-	         
-		 std::vector<BodyPart *> bodyparts;
+       std::vector<Eigen::RowVector3d> displacement; //displacement on each frame
+       std::vector<Quaternion> rot; // rotation on each frame
 };
 
 int mot_parsing (const std::string &filename, std::vector<BodyPart> &body)
@@ -32,38 +28,51 @@ int mot_parsing (const std::string &filename, std::vector<BodyPart> &body)
     if(!ifs)
     {
         std::cerr << "Couldn't read options file: " << filename << std::endl;
-        return;
+        return 1;
     }
 
     std::string line;
-    ifs >> line;
+    getline(ifs, line);
+    std::stringstream s2(line);
+    s2 >> line;
     int nFrames;
-    ifs >> nFrames;
+    s2 >> nFrames;
     std::cout << "number of frames : " << nFrames << std::endl;
     getline(ifs, line);
 
     for (int j = 0; j < body.size(); j++){
     	for (int i = 0; i < nFrames; i++){
-             Eigen::Vector3d transformation;
+             getline(ifs, line);
+             std::stringstream ss(line);
+             Eigen::RowVector3d transformation;
 	     for (int k = 0; k < 3; k++)
-                  ifs >> transformation(k);
+                  ss >> transformation(k);
              body[j].displacement.push_back(transformation);
 	}
         getline(ifs, line);
         getline(ifs, line);
     	for (int i = 0; i < nFrames; i++){
-             Eigen::Vector4d quaternion;
-	     for (int k = 0; k < 4; k++)
-                  ifs >> quaternion(k);
+             getline(ifs, line);
+             std::stringstream ss(line);
+             Quaternion quaternion;
+             ss >> quaternion.s;
+	     for (int k = 0; k < 3; k++)
+                  ss >> quaternion.v(k);
              body[j].rot.push_back(quaternion);
+             
 	}
+        getline(ifs, line);
+        getline(ifs, line);
     }
-        
+       return nFrames; 
 }
 
-void get_pos(BodyPart &part, int frameID, Eigen::MatrixXd newPos)
+void get_pos(BodyPart &part, int frameID, Eigen::MatrixXd &newPos)
 {
-    
+     newPos.resize(part.originV.rows(), 3);
+     for (int i = 0; i < part.originV.rows(); i++)
+	  newPos.row(i) = part.rot[frameID].rotate(part.originV.row(i)).transpose() + part.displacement[frameID];
+ 
 }
 
 int main(int argc, char *argv[])
@@ -85,17 +94,20 @@ int main(int argc, char *argv[])
         body.push_back(part); 
     }
 
-    int nFrame = mot_parsing(argv[1], body);
+    int nFrames = mot_parsing(argv[1], body);
    
     for (int j = 0; j < body.size(); j++){
-        for (int i = 0; i < nFrame, i++){
-            if (i < 10) {
-                std::string output = "MovingBody/body000"+std::to_string(j)_std::to_string(i)+".ply";
-		Eigen::MatrixXd newPos;
-                get_pos(body[j], i, newPos);
+        for (int i = 0; i < nFrames; i++){
+	    Eigen::MatrixXd newPos;
+            get_pos(body[j], i, newPos);
+            if (j < 10) {
+                std::string output = "MovingBody/body000"+std::to_string(j) + "_" + std::to_string(i)+".ply";
                 igl::writePLY(output, newPos, body[j].F);
             }
-            else
+            else{
+                std::string output = "MovingBody/body00"+std::to_string(j) + "_" + std::to_string(i)+".ply";
+                igl::writePLY(output, newPos, body[j].F);
+            }
         }
     }
     
