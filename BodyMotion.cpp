@@ -22,6 +22,38 @@ struct BodyPart{
        std::vector<Quaternion> rot; // rotation on each frame
 };
 
+Quaternion slerp(Quaternion v0, Quaternion v1, double t) {
+    v0.normalize();
+    v1.normalize();
+
+    // Compute the cosine of the angle between the two vectors.
+    double dot = dot_product(v0, v1);
+
+    if (dot < 0.0f) {
+        v1 = -v1;
+        dot = -dot;
+    }  
+
+    const double DOT_THRESHOLD = 0.9995;
+    if (dot > DOT_THRESHOLD) {
+
+        Quaternion result = v0 + t*(v1 - v0);
+        result.normalize();
+        return result;
+    }
+
+    // Since dot is in range [0, DOT_THRESHOLD], acos is safe
+    double theta_0 = acos(dot);        // theta_0 = angle between input vectors
+    double theta = theta_0*t;          // theta = angle between v0 and result
+    double sin_theta = sin(theta);     // compute this value only once
+    double sin_theta_0 = sin(theta_0); // compute this value only once
+
+    double s0 = cos(theta) - dot * sin_theta / sin_theta_0;  // == sin(theta_0 - theta) / sin(theta_0)
+    double s1 = sin_theta / sin_theta_0;
+
+    return (s0 * v0) + (s1 * v1);
+}
+
 int mot_parsing (const std::string &filename, std::vector<BodyPart> &body)
 {
     std::ifstream ifs(filename);
@@ -67,12 +99,13 @@ int mot_parsing (const std::string &filename, std::vector<BodyPart> &body)
        return nFrames; 
 }
 
-void get_pos(BodyPart &part, int frameID, Eigen::MatrixXd &newPos)
+void get_pos(BodyPart &part, int frameID, double elapsetime,  Eigen::MatrixXd &newPos)
 {
      newPos.resize(part.originV.rows(), 3);
-     for (int i = 0; i < part.originV.rows(); i++)
-	  newPos.row(i) = part.rot[frameID].rotate(part.originV.row(i)).transpose() + part.displacement[frameID];
- 
+     for (int i = 0; i < part.originV.rows(); i++){
+          Quaternion q = slerp(part.rot[frameID], part.rot[frameID + 1], elapsetime); 
+	  newPos.row(i) = q.rotate(part.originV.row(i)).transpose() + part.displacement[frameID];
+     }
 }
 
 int main(int argc, char *argv[])
@@ -95,19 +128,20 @@ int main(int argc, char *argv[])
     }
 
     int nFrames = mot_parsing(argv[1], body);
+
+    int frameInterval = 5;
+    for(int i = 0; i < body.size(); i++){
+        for(int j = 0; j <5 ; j++)
+             get_pos(body[i], 0, (double)j/5.0);
+    }
    
     for (int j = 0; j < body.size(); j++){
-        for (int i = 0; i < nFrames; i++){
+        body[j].originV *= 1.1;
+        for (int i = 0; i < 5; i++){
 	    Eigen::MatrixXd newPos;
             get_pos(body[j], i, newPos);
-            if (j < 10) {
-                std::string output = "MovingBody/body000"+std::to_string(j) + "_" + std::to_string(i)+".ply";
-                igl::writePLY(output, newPos, body[j].F);
-            }
-            else{
-                std::string output = "MovingBody/body00"+std::to_string(j) + "_" + std::to_string(i)+".ply";
-                igl::writePLY(output, newPos, body[j].F);
-            }
+            std::string output = "MovingBody/" + std::to_string(i) + "EnlargedBody" +std::to_string(j) + ".ply";
+            igl::writePLY(output, newPos, body[j].F);
         }
     }
     
