@@ -22,12 +22,13 @@ struct BodyPart{
        std::vector<Quaternion> rot; // rotation on each frame
 };
 
-Quaternion slerp(Quaternion v0, Quaternion v1, double t) {
-    v0.normalize();
-    v1.normalize();
-
+Quaternion slerp(Quaternion q0, Quaternion q1, double t) {
     // Compute the cosine of the angle between the two vectors.
-    double dot = dot_product(v0, v1);
+    Eigen::Vector4d v0, v1;
+    v0 << q0.s, q0.v(0), q0.v(1), q0.v(2);
+    v1 << q1.s, q1.v(0), q1.v(1), q1.v(2);
+
+    double dot = v0.dot(v1);
 
     if (dot < 0.0f) {
         v1 = -v1;
@@ -37,9 +38,14 @@ Quaternion slerp(Quaternion v0, Quaternion v1, double t) {
     const double DOT_THRESHOLD = 0.9995;
     if (dot > DOT_THRESHOLD) {
 
-        Quaternion result = v0 + t*(v1 - v0);
-        result.normalize();
-        return result;
+        Eigen::Vector4d result = v0 + t*(v1 - v0);
+        result = result.normalized();
+       
+        Quaternion ans;
+	ans.s = result(0);
+        for (int i = 0; i < 3; i++)
+	     ans.v(i) = result(i+1);
+        return ans;
     }
 
     // Since dot is in range [0, DOT_THRESHOLD], acos is safe
@@ -51,7 +57,12 @@ Quaternion slerp(Quaternion v0, Quaternion v1, double t) {
     double s0 = cos(theta) - dot * sin_theta / sin_theta_0;  // == sin(theta_0 - theta) / sin(theta_0)
     double s1 = sin_theta / sin_theta_0;
 
-    return (s0 * v0) + (s1 * v1);
+    Eigen::Vector4d result = (s0 * v0) + (s1 * v1);
+    Quaternion ans;
+    ans.s = result(0);
+    for (int i = 0; i < 3; i++)
+         ans.v(i) = result(i+1);
+    return ans;
 }
 
 int mot_parsing (const std::string &filename, std::vector<BodyPart> &body)
@@ -99,12 +110,27 @@ int mot_parsing (const std::string &filename, std::vector<BodyPart> &body)
        return nFrames; 
 }
 
-void get_pos(BodyPart &part, int frameID, double elapsetime,  Eigen::MatrixXd &newPos)
+void get_interpolatedPos(BodyPart &part, int frameID, double elapsetime,  Eigen::MatrixXd &newPos)
+{
+     newPos.resize(part.originV.rows(), 3);
+     Quaternion x = part.rot[frameID];
+     std::cout << x.s << " " << x.v(0) << " " << x.v(1) << " " << x.v(2) << std::endl;
+     x = part.rot[frameID + 200];
+     std::cout << x.s << " " << x.v(0) << " " << x.v(1) << " " << x.v(2) << std::endl;
+     Eigen::RowVector3d diff = part.displacement[frameID + 200] - part.displacement[frameID];
+     Quaternion q = slerp(part.rot[frameID], part.rot[frameID + 200], elapsetime);
+     std::cout <<"new quaternion : " << std::endl << q.s << " " << q.v(0) << " " << q.v(1) << " " << q.v(2) << std::endl;
+     std::cout <<"diff : " << diff(0) << " " << diff(1) << " " << diff(2) << std::endl;
+     for (int i = 0; i < part.originV.rows(); i++){
+	  newPos.row(i) = q.rotate(part.originV.row(i)).transpose() + part.displacement[frameID] + elapsetime * diff;
+     }
+}
+
+void get_pos(BodyPart &part, int frameID, Eigen::MatrixXd &newPos)
 {
      newPos.resize(part.originV.rows(), 3);
      for (int i = 0; i < part.originV.rows(); i++){
-          Quaternion q = slerp(part.rot[frameID], part.rot[frameID + 1], elapsetime); 
-	  newPos.row(i) = q.rotate(part.originV.row(i)).transpose() + part.displacement[frameID];
+	  newPos.row(i) = part.rot[frameID].rotate(part.originV.row(i)).transpose() + part.displacement[frameID];
      }
 }
 
@@ -131,19 +157,23 @@ int main(int argc, char *argv[])
 
     int frameInterval = 5;
     for(int i = 0; i < body.size(); i++){
-        for(int j = 0; j <5 ; j++)
-             get_pos(body[i], 0, (double)j/5.0);
-    }
-   
-    for (int j = 0; j < body.size(); j++){
-        body[j].originV *= 1.1;
-        for (int i = 0; i < 5; i++){
-	    Eigen::MatrixXd newPos;
-            get_pos(body[j], i, newPos);
-            std::string output = "MovingBody/" + std::to_string(i) + "EnlargedBody" +std::to_string(j) + ".ply";
-            igl::writePLY(output, newPos, body[j].F);
+        for(int j = 0; j <6 ; j++){
+            Eigen::MatrixXd newPos;
+            get_interpolatedPos(body[i], 0, (double)j/frameInterval, newPos);
+            std::string output = "MovingBody/" + std::to_string(j) + "EnlargedBody" +std::to_string(i) + ".ply";
+            igl::writePLY(output, newPos, body[i].F);
         }
     }
+   
+    //for (int j = 0; j < body.size(); j++){
+    //    body[j].originV *= 1.1;
+    //    for (int i = 0; i < 5; i++){
+    //        Eigen::MatrixXd newPos;
+    //        get_pos(body[j], i * 20, newPos);
+    //        std::string output = "MovingBody/" + std::to_string(i) + "KeyFrameBody" +std::to_string(j) + ".ply";
+    //        igl::writePLY(output, newPos, body[j].F);
+    //    }
+    //}
     
     return 0;
 }
